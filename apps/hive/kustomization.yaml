@@ -36,6 +36,8 @@ resources:
 - https://raw.githubusercontent.com/openshift/hive/01de8edf2688c9ee1368f46f36b98b90d7542494/config/crds/hiveinternal.openshift.io_fakeclusterinstalls.yaml
 - hiveconfig.yaml
 - admission-cert
+# Generated from clusterimagesets/versions.yaml by hack/gen-clusterimagesets.sh
+- clusterimagesets
 
 images:
 - name: registry.ci.openshift.org/openshift/hive-v4.0:hive

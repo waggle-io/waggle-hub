@@ -1,0 +1,70 @@
+# Keeps apps/hive/clusterimagesets in step with the OpenShift update graph.
+#   - daily (and on demand): regenerate, verify, and open or update a PR
+#   - on PRs touching ClusterImageSets: verify, and fail if the generated
+#     files don't match what versions.yaml produces
+# Merging the PR is the approval; Argo CD then syncs the hive app.
+name: clusterimagesets
+
+on:
+  schedule:
+  - cron: "17 5 * * *"
+  workflow_dispatch:
+  pull_request:
+    paths:
+    - apps/hive/clusterimagesets/**
+    - hack/gen-clusterimagesets.sh
+    - hack/verify-clusterimagesets.sh
+
+jobs:
+  update:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Generate
+      run: hack/gen-clusterimagesets.sh "$RUNNER_TEMP/warnings.md"
+
+    - name: Verify
+      run: hack/verify-clusterimagesets.sh
+
+    - name: Build PR body
+      run: |
+        {
+          echo "Regenerated from the OpenShift update graph by \`hack/gen-clusterimagesets.sh\`."
+          echo
+          echo "Merging this PR is the approval: Argo CD syncs the new ClusterImageSets to the hub."
+          if [ -s "$RUNNER_TEMP/warnings.md" ]; then
+            echo
+            echo "### End-of-life warnings"
+            cat "$RUNNER_TEMP/warnings.md"
+          fi
+        } > "$RUNNER_TEMP/body.md"
+
+    - uses: peter-evans/create-pull-request@v8
+      with:
+        branch: automation/clusterimagesets
+        delete-branch: true
+        add-paths: apps/hive/clusterimagesets/*
+        commit-message: "clusterimagesets: sync with OpenShift update graph"
+        title: "ClusterImageSets: sync with OpenShift update graph"
+        body-path: ${{ runner.temp }}/body.md
+        labels: clusterimagesets
+
+  verify:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Verify
+      run: hack/verify-clusterimagesets.sh
+
+    - name: Generated files match versions.yaml
+      run: |
+        hack/gen-clusterimagesets.sh
+        git diff --exit-code -- apps/hive/clusterimagesets \
+          || { echo "::error::ClusterImageSets differ from what versions.yaml generates. Run hack/gen-clusterimagesets.sh and commit the result."; exit 1; }

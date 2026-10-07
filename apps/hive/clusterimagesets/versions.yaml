@@ -1,0 +1,10 @@
+# OpenShift versions offered to requesters. This is the only file to edit by
+# hand: hack/gen-clusterimagesets.sh renders the ClusterImageSets next to it
+# from the OpenShift update graph, and a scheduled workflow opens a PR when
+# new z-streams appear.
+channel: stable          # stable-<minor>; never fast or candidate for requester-facing versions
+arch: amd64              # update graph arch: amd64 (later: multi, for arm64 workers)
+minors: ["4.22", "4.21", "4.20"]
+keepPerMinor: 2          # latest z-stream + the previous one
+default: "4.21"          # minor the agent proposes when the requester doesn't pick one
+warnDaysBeforeEOL: 60    # flag a minor this many days before maintenance support ends

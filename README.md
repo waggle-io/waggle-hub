@@ -29,6 +29,7 @@ waggle-hub/
 ├── deploy/
 │   ├── eks/                    # Terraform: VPC, EKS, EBS CSI, AWS LB controller, ACM private CA
 │   └── argocd/                 # Argo CD install: kustomize over upstream install.yaml
+├── hack/                       # ClusterImageSet generator and checks
 ├── gitops/
 │   ├── rootapp.yaml            # app of apps: apply once, Argo CD manages the rest
 │   ├── kustomization.yaml      # lists the child Applications
@@ -40,7 +41,8 @@ waggle-hub/
     ├── certmanager/            # kustomize + Helm chart
     ├── externalsecrets/        # kustomize + Helm chart
     └── hive/                   # kustomize: upstream operator, CRDs, HiveConfig
-        └── admission-cert/     # cert renewer (Job + CronJob)
+        ├── admission-cert/     # cert renewer (Job + CronJob)
+        └── clusterimagesets/   # offered OpenShift versions (generated)
 ```
 
 ## Bootstrap
@@ -152,6 +154,40 @@ Hive is built for OpenShift. Three things differ on vanilla Kubernetes, and the 
 
 > **Risk:** if the cert renewer fails silently, the Hive webhook rejects all writes once the cert expires. Alert on the age of `hiveadmission-serving-cert` and on failed `hiveadmission-cert-renew` jobs.
 
+## OpenShift versions (ClusterImageSets)
+
+The versions requesters can choose are Hive `ClusterImageSet`s in `apps/hive/clusterimagesets/`. Only `versions.yaml` is edited by hand; everything else in that directory is generated.
+
+```yaml
+channel: stable
+arch: amd64
+minors: ["4.22", "4.21", "4.20"]
+keepPerMinor: 2          # latest z-stream + the previous one
+default: "4.21"
+warnDaysBeforeEOL: 60
+```
+
+`hack/gen-clusterimagesets.sh` reads it and, for each minor:
+
+- takes the newest `keepPerMinor` releases in the `stable-<minor>` channel of the [OpenShift update graph](https://api.openshift.com/api/upgrades_info/v1/graph?channel=stable-4.21&arch=amd64), with `releaseImage` **pinned by digest**;
+- checks the [Red Hat lifecycle API](https://access.redhat.com/product-life-cycles/api/v1/products?name=OpenShift%20Container%20Platform%204): it fails for a minor past maintenance support and warns within `warnDaysBeforeEOL` days;
+- labels each set `waggle.io/minor`, `waggle.io/offered` and `waggle.io/default`, and annotates it with the errata link and support end date.
+
+Versions that drop out of the window are **retired, not deleted**: they keep their file with `waggle.io/offered: "false"`, so existing `ClusterDeployment`s that reference them still resolve. Only `offered=true` sets should be shown to requesters. Delete a retired file by hand once no cluster in `waggle-clusters` references it.
+
+The `clusterimagesets` workflow runs the generator daily and opens or updates a PR (branch `automation/clusterimagesets`) when new z-streams appear, with any end-of-life warnings in the description. Merging it is the approval; Argo CD then syncs the hive app. On PRs it runs `hack/verify-clusterimagesets.sh` (digest pinned, image exists, exactly one default, kustomization up to date) and fails if the committed files don't match what `versions.yaml` generates.
+
+To change the offered versions, edit `versions.yaml`, then run:
+
+```sh
+hack/gen-clusterimagesets.sh
+hack/verify-clusterimagesets.sh   # needs skopeo
+```
+
+and commit the result. Both scripts need `curl`, `jq` and `yq` (mikefarah v4).
+
+> The workflow needs **Settings → Actions → General → Allow GitHub Actions to create and approve pull requests** enabled on this repo.
+
 ## Roadmap for this repo
 
 From the Waggle plan, the hub's pieces by phase:
@@ -166,7 +202,7 @@ From the Waggle plan, the hub's pieces by phase:
 - [ ] `ClusterSecretStore` and IRSA role for Secrets Manager; per-cluster credential and pull-secret sync
 - [x] Argo CD install in `deploy/argocd`, self-managed after bootstrap
 - [ ] Argo CD Application pointing at `waggle-clusters/clusters/`
-- [ ] `ClusterImageSet`s for the offered OpenShift versions
+- [x] `ClusterImageSet`s for the offered OpenShift versions, generated from the update graph
 - [ ] Hand-written AWS `ClusterDeployment` provisioned and deprovisioned three times with no manual cleanup
 - [ ] Forced cert rotation tested
 
