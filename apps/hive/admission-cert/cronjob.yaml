@@ -1,0 +1,30 @@
+# EKS app-serving certs live at most 45 days; renew once fewer than 15 remain.
+# hive-operator hashes the Secret onto the hiveadmission pod template, so a
+# renewed cert triggers a rollout automatically.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: hiveadmission-cert-renew
+spec:
+  schedule: "0 3 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 3
+      template:
+        spec:
+          serviceAccountName: hiveadmission-cert-issuer
+          restartPolicy: OnFailure
+          containers:
+          - name: renew-cert
+            image: alpine/k8s:1.34.12
+            command: ["/bin/sh", "/scripts/issue-cert.sh"]
+            volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+          volumes:
+          - name: scripts
+            configMap:
+              name: hiveadmission-cert-script

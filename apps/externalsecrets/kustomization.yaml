@@ -1,0 +1,21 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Requires `kustomize.buildOptions: --enable-helm` in argocd-cm.
+
+resources:
+- namespace.yaml
+
+helmCharts:
+- name: external-secrets
+  repo: https://charts.external-secrets.io
+  version: 2.12.0
+  releaseName: external-secrets
+  namespace: external-secrets
+  includeCRDs: true
+  valuesInline:
+    installCRDs: true
+    # To read from AWS Secrets Manager / SSM, create an IRSA role and set:
+    # serviceAccount:
+    #   annotations:
+    #     eks.amazonaws.com/role-arn: arn:aws:iam::<account-id>:role/<cluster>-external-secrets

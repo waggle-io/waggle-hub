@@ -1,0 +1,13 @@
+# Creating the HiveConfig is what makes hive-operator deploy the rest of Hive
+# (hive-controllers, hive-clustersync, hive-machinepool, hiveadmission).
+apiVersion: hive.openshift.io/v1
+kind: HiveConfig
+metadata:
+  name: hive
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+    # The HiveConfig CRD is created in this same sync
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  logLevel: info
+  targetNamespace: hive

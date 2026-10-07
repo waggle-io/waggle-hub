@@ -1,0 +1,25 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# On OpenShift the service-ca operator provides hiveadmission's serving cert.
+# On vanilla Kubernetes, hive-operator expects the `hiveadmission-serving-cert`
+# Secret to exist and injects the *cluster* CA into the hiveadmission
+# APIService/webhooks, so the cert must be signed by the cluster CA.
+# On EKS that means the `beta.eks.amazonaws.com/app-serving` signer, which
+# caps certificate lifetime at 45 days, hence a renewal CronJob alongside
+# the initial Job.
+
+namespace: hive
+
+resources:
+- rbac.yaml
+- job.yaml
+- cronjob.yaml
+
+configMapGenerator:
+- name: hiveadmission-cert-script
+  files:
+  - issue-cert.sh
+
+generatorOptions:
+  disableNameSuffixHash: true

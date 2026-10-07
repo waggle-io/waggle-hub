@@ -1,0 +1,54 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# OpenShift Hive on vanilla Kubernetes (EKS).
+# Hive has no versioned releases: everything is pinned to one upstream commit,
+# and the quay.io image tag is that commit's short SHA. Bump both together.
+#
+# No top-level `namespace:` on purpose: HiveConfig is cluster-scoped and
+# kustomize would wrongly namespace it (it doesn't know the CRD's scope).
+
+resources:
+- namespace.yaml
+# hive-operator: ServiceAccount, Deployment, RBAC, NetworkPolicy (namespaced to hive upstream)
+- https://github.com/openshift/hive//config?ref=01de8edf2688c9ee1368f46f36b98b90d7542494
+# CRDs (upstream installs these separately from the operator)
+- https://raw.githubusercontent.com/openshift/hive/01de8edf2688c9ee1368f46f36b98b90d7542494/config/crds/hive.openshift.io_checkpoints.yaml
+- https://raw.githubusercontent.com/openshift/hive/01de8edf2688c9ee1368f46f36b98b90d7542494/config/crds/hive.openshift.io_clusterclaims.yaml
+- https://raw.githubusercontent.com/openshift/hive/01de8edf2688c9ee1368f46f36b98b90d7542494/config/crds/hive.openshift.io_clusterdeploymentcustomizations.yaml
+- https://raw.githubusercontent.com/openshift/hive/01de8edf2688c9ee1368f46f36b98b90d7542494/config/crds/hive.openshift.io_clusterdeployments.yaml
+- https://raw.githubusercontent.com/openshift/hive/01de8edf2688c9ee1368f46f36b98b90d7542494/config/crds/hive.openshift.io_clusterdeprovisions.yaml
+- https://raw.githubusercontent.com/openshift/hive/01de8edf2688c9ee1368f46f36b98b90d7542494/config/crds/hive.openshift.io_clusterimagesets.yaml
+- https://raw.githubusercontent.com/openshift/hive/01de8edf2688c9ee1368f46f36b98b90d7542494/config/crds/hive.openshift.io_clusterpools.yaml
+- https://raw.githubusercontent.com/openshift/hive/01de8edf2688c9ee1368f46f36b98b90d7542494/config/crds/hive.openshift.io_clusterprovisions.yaml
+- https://raw.githubusercontent.com/openshift/hive/01de8edf2688c9ee1368f46f36b98b90d7542494/config/crds/hive.openshift.io_clusterrelocates.yaml
+- https://raw.githubusercontent.com/openshift/hive/01de8edf2688c9ee1368f46f36b98b90d7542494/config/crds/hive.openshift.io_clusterstates.yaml
+- https://raw.githubusercontent.com/openshift/hive/01de8edf2688c9ee1368f46f36b98b90d7542494/config/crds/hive.openshift.io_dnszones.yaml
+- https://raw.githubusercontent.com/openshift/hive/01de8edf2688c9ee1368f46f36b98b90d7542494/config/crds/hive.openshift.io_hiveconfigs.yaml
+- https://raw.githubusercontent.com/openshift/hive/01de8edf2688c9ee1368f46f36b98b90d7542494/config/crds/hive.openshift.io_machinepoolnameleases.yaml
+- https://raw.githubusercontent.com/openshift/hive/01de8edf2688c9ee1368f46f36b98b90d7542494/config/crds/hive.openshift.io_machinepools.yaml
+- https://raw.githubusercontent.com/openshift/hive/01de8edf2688c9ee1368f46f36b98b90d7542494/config/crds/hive.openshift.io_selectorsyncidentityproviders.yaml
+- https://raw.githubusercontent.com/openshift/hive/01de8edf2688c9ee1368f46f36b98b90d7542494/config/crds/hive.openshift.io_selectorsyncsets.yaml
+- https://raw.githubusercontent.com/openshift/hive/01de8edf2688c9ee1368f46f36b98b90d7542494/config/crds/hive.openshift.io_syncidentityproviders.yaml
+- https://raw.githubusercontent.com/openshift/hive/01de8edf2688c9ee1368f46f36b98b90d7542494/config/crds/hive.openshift.io_syncsets.yaml
+- https://raw.githubusercontent.com/openshift/hive/01de8edf2688c9ee1368f46f36b98b90d7542494/config/crds/hiveinternal.openshift.io_clustersyncleases.yaml
+- https://raw.githubusercontent.com/openshift/hive/01de8edf2688c9ee1368f46f36b98b90d7542494/config/crds/hiveinternal.openshift.io_clustersyncs.yaml
+- https://raw.githubusercontent.com/openshift/hive/01de8edf2688c9ee1368f46f36b98b90d7542494/config/crds/hiveinternal.openshift.io_fakeclusterinstalls.yaml
+- hiveconfig.yaml
+- admission-cert
+
+images:
+- name: registry.ci.openshift.org/openshift/hive-v4.0:hive
+  newName: quay.io/openshift-hive/hive
+  newTag: 01de8edf26
+
+patches:
+# Tag is pinned, so no need to re-pull on every restart. The operator copies
+# this policy onto the hive-controllers / hiveadmission deployments it creates.
+- target:
+    kind: Deployment
+    name: hive-operator
+  patch: |-
+    - op: replace
+      path: /spec/template/spec/containers/0/imagePullPolicy
+      value: IfNotPresent
