@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-cm
+data:
+  # External URL, used for SSO callbacks and links in notifications
+  url: https://gitops.waggle.io
+
+  # apps/certmanager and apps/externalsecrets render Helm charts via kustomize
+  kustomize.buildOptions: --enable-helm
+
+  # Report child Application health so the root app's sync waves wait for
+  # each wave to be healthy before starting the next
+  resource.customizations.health.argoproj.io_Application: |
+    hs = {}
+    hs.status = "Progressing"
+    hs.message = ""
+    if obj.status ~= nil then
+      if obj.status.health ~= nil then
+        hs.status = obj.status.health.status
+        if obj.status.health.message ~= nil then
+          hs.message = obj.status.health.message
+        end
+      end
+    end
+    return hs

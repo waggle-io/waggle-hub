@@ -16,7 +16,7 @@ The agent decides and explains; deterministic code validates, prices and renders
 | `hive` | Cert renewer | Issues and rotates the `hiveadmission` serving cert from the EKS signer |
 | `external-secrets` | External Secrets Operator | Syncs cloud credentials and the pull secret from Secrets Manager / Vault |
 | `cert-manager` | cert-manager | General-purpose certificates for hub services |
-| `argocd` | Argo CD | Syncs this repo (hub apps) and merged `waggle-clusters` directories |
+| `argocd` | Argo CD | Syncs this repo (hub apps and its own install) and merged `waggle-clusters` directories |
 | `waggle` | Waggle MCP server, status watcher, TTL reaper | *Planned* (Phases 4 and 7) |
 | `<cluster>` | `ClusterDeployment`, `MachinePool`, secrets | One namespace per spoke cluster, applied from `waggle-clusters` |
 
@@ -28,13 +28,15 @@ The agent decides and explains; deterministic code validates, prices and renders
 waggle-hub/
 ├── deploy/
 │   ├── eks/                    # Terraform: VPC, EKS, EBS CSI, AWS LB controller, ACM private CA
-│   └── argocd/                 # Argo CD install (to be added)
-└── apps/
-    ├── rootapp.yaml            # app of apps: apply once, Argo CD manages the rest
-    ├── applications/           # one Argo CD Application per hub app
-    │   ├── certmanager.yaml
-    │   ├── externalsecrets.yaml
-    │   └── hive.yaml
+│   └── argocd/                 # Argo CD install: kustomize over upstream install.yaml
+├── gitops/
+│   ├── rootapp.yaml            # app of apps: apply once, Argo CD manages the rest
+│   ├── kustomization.yaml      # lists the child Applications
+│   ├── argocd/                 # Argo CD manages its own install
+│   ├── certmanager/
+│   ├── externalsecrets/
+│   └── hive/
+└── apps/                       # what each child Application deploys
     ├── certmanager/            # kustomize + Helm chart
     ├── externalsecrets/        # kustomize + Helm chart
     └── hive/                   # kustomize: upstream operator, CRDs, HiveConfig
@@ -56,24 +58,67 @@ Review `variables.tf` first (region, cluster name, node sizing, domain). Size th
 
 ### 2. Install Argo CD
 
-Install Argo CD into the `argocd` namespace. The hub apps use kustomize's `helmCharts`, so Argo CD must have Helm enabled for kustomize builds in `argocd-cm`:
-
-```yaml
-data:
-  kustomize.buildOptions: --enable-helm
+```sh
+kubectl apply -k deploy/argocd --server-side
+kubectl -n argocd rollout status deploy/argocd-server
+kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d; echo
 ```
 
-With the Argo CD Helm chart, set this under `configs.cm`.
+`deploy/argocd` installs upstream Argo CD (pinned `v3.5.4`) with hub-specific settings:
 
-### 3. Apply the root app
+- `kustomize.buildOptions: --enable-helm`, needed by the hub apps that render Helm charts through kustomize
+- a health check for `Application` resources, so the root app's sync waves wait for each child app to become healthy
+- `server.insecure: "true"` and an ALB Ingress (AWS Load Balancer Controller): TLS terminates at the ALB with the matching ACM certificate
+
+Point a Route53 record for `gitops.waggle.io` at the ALB (`kubectl -n argocd get ingress argocd-server`). The CLI must use gRPC-Web through the ALB: `argocd login gitops.waggle.io --grpc-web`. Change the admin password and delete `argocd-initial-admin-secret` after first login.
+
+After the root app syncs, Argo CD manages its own install via `gitops/argocd/argocd.yaml` (self-heal on, prune off).
+
+### 3. Give Argo CD access to this repo
+
+This repo is private, so Argo CD needs a GitHub token to read it. Create a [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new) with:
+
+- **Resource owner:** `waggle-io`
+- **Repository access:** only `waggle-hub`
+- **Permissions:** Contents → Read-only (Metadata → Read-only is added automatically)
+
+Then register it as an Argo CD repository Secret. The token never goes in Git:
 
 ```sh
-kubectl apply -f apps/rootapp.yaml
+read -rs GITHUB_TOKEN   # paste the token; keeps it out of shell history
+
+kubectl -n argocd create secret generic repo-waggle-hub \
+  --from-literal=type=git \
+  --from-literal=url=https://github.com/waggle-io/waggle-hub \
+  --from-literal=username=git \
+  --from-literal=password="$GITHUB_TOKEN"
+kubectl -n argocd label secret repo-waggle-hub argocd.argoproj.io/secret-type=repository
+
+unset GITHUB_TOKEN
 ```
 
-The root app syncs `apps/applications`, which creates one child Application per hub app. Each child syncs automatically with prune and self-heal.
+Check that Argo CD can reach the repo: **Settings → Repositories** in the UI should show `waggle-hub` as *Successful*, or run `argocd repo list --grpc-web`.
 
-### 4. Verify Hive
+Fine-grained tokens expire. Before expiry, create a new token and update the Secret in place:
+
+```sh
+read -rs GITHUB_TOKEN
+kubectl -n argocd patch secret repo-waggle-hub \
+  -p "{\"stringData\":{\"password\":\"$GITHUB_TOKEN\"}}"
+unset GITHUB_TOKEN
+```
+
+> Once External Secrets has a `ClusterSecretStore`, this Secret can move to Secrets Manager and be synced by an `ExternalSecret`. That ExternalSecret can't live in this repo's sync path, because Argo CD needs the token before it can read the repo at all.
+
+### 4. Apply the root app
+
+```sh
+kubectl apply -f gitops/rootapp.yaml
+```
+
+The root app syncs `gitops/`, which creates one child Application per hub app. Each child syncs automatically with prune and self-heal.
+
+### 5. Verify Hive
 
 ```sh
 kubectl -n hive get pods
@@ -90,7 +135,7 @@ Expect `hive-operator`, `hive-controllers`, `hive-clustersync`, `hive-machinepoo
 | external-secrets | `charts.external-secrets.io` | `2.12.0` | No `ClusterSecretStore` yet; needs an IRSA role for AWS Secrets Manager |
 | hive | `github.com/openshift/hive` | commit `01de8ed` | Operator, 21 CRDs and `HiveConfig`; image `quay.io/openshift-hive/hive:01de8edf26` |
 
-Child Applications carry sync waves (cert-manager and external-secrets in wave 0, Hive in wave 1). Argo CD only waits on a child app's health between waves if an `argoproj.io/Application` health check is configured in `argocd-cm`.
+Child Applications carry sync waves (Argo CD in wave -1, cert-manager and external-secrets in wave 0, Hive in wave 1). The `Application` health check in `deploy/argocd/argocd-cm.yaml` makes each wave wait for the previous one to be healthy.
 
 ## Running upstream Hive on EKS
 
@@ -119,7 +164,8 @@ From the Waggle plan, the hub's pieces by phase:
 - [x] Cert renewer using the EKS `app-serving` signer
 - [x] External Secrets Operator installed
 - [ ] `ClusterSecretStore` and IRSA role for Secrets Manager; per-cluster credential and pull-secret sync
-- [ ] Argo CD install in `deploy/argocd`, plus an Application pointing at `waggle-clusters/clusters/`
+- [x] Argo CD install in `deploy/argocd`, self-managed after bootstrap
+- [ ] Argo CD Application pointing at `waggle-clusters/clusters/`
 - [ ] `ClusterImageSet`s for the offered OpenShift versions
 - [ ] Hand-written AWS `ClusterDeployment` provisioned and deprovisioned three times with no manual cleanup
 - [ ] Forced cert rotation tested

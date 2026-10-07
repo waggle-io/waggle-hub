@@ -1,13 +1,13 @@
 variable "organization_name" {
   description = "Name of the organization"
   type        = string
-  default     = "RedHat"
+  default     = "kloudstak"
 }
 
 variable "cluster_name" {
   description = "Name of the EKS cluster"
   type        = string
-  default     = "edge-fleet-mgmt"
+  default     = "waggle-hub"
 }
 
 variable "region" {
@@ -73,7 +73,7 @@ variable "tags" {
 variable "domain_name" {
   description = "Base domain name managed in Route53 (e.g., example.com). A wildcard cert *.domain_name will be issued."
   type        = string
-  default     = "edgedemos.io"
+  default     = "waggle.io"
 }
 
 variable "services" {
@@ -85,9 +85,6 @@ variable "services" {
     health_check_path = optional(string, "/") # ALB health check path
   }))
   default = [
-     { name = "flightctl-api", port = 3443, host = "api.flightctl.edgedemos.io" },
-     { name = "flightctl-ui",  port = 8080, host = "ui.flightctl.edgedemos.io" },
-     { name = "zipkin",        port = 9411, host = "zipkin.flightctl.edgedemos.io" },
-     { name = "sso",           port = 9411, host = "sso.flightctl.edgedemos.io" },
+     { name = "gitops", port = 3443, host = "gitops.waggle.io" },
    ]
 }

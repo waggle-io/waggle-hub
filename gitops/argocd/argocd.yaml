@@ -1,24 +1,24 @@
----
-# Root "app of apps". Apply this once by hand:
-#   kubectl apply -f gitops/rootapp.yaml
-# ArgoCD then syncs every Application listed in gitops/kustomization.yaml.
+# Argo CD manages its own install after the one-time bootstrap.
+# Prune stays off: a bad commit must not be able to delete Argo CD itself.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: rootapp
+  name: argocd
   namespace: argocd
-  finalizers:
-  - resources-finalizer.argocd.argoproj.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
 spec:
   project: default
   source:
     repoURL: https://github.com/waggle-io/waggle-hub
     targetRevision: main
-    path: gitops/
+    path: deploy/argocd
   destination:
     name: in-cluster
     namespace: argocd
   syncPolicy:
     automated:
-      prune: true
+      prune: false
       selfHeal: true
+    syncOptions:
+    - ServerSideApply=true

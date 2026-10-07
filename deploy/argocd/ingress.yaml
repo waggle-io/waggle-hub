@@ -1,0 +1,32 @@
+# Exposes the Argo CD UI/API through an ALB managed by the AWS Load Balancer
+# Controller (installed by deploy/eks). No certificate-arn annotation: the
+# controller discovers the ACM certificate matching spec.tls.hosts.
+# The CLI goes through the ALB with gRPC-Web:
+#   argocd login gitops.waggle.io --grpc-web
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: argocd-server
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    alb.ingress.kubernetes.io/backend-protocol: HTTP
+    alb.ingress.kubernetes.io/healthcheck-path: /healthz
+spec:
+  ingressClassName: alb
+  tls:
+  - hosts:
+    - gitops.waggle.io
+  rules:
+  - host: gitops.waggle.io
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: argocd-server
+            port:
+              name: http
