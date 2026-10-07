@@ -36,7 +36,8 @@ waggle-hub/
 │   ├── argocd/                 # Argo CD manages its own install
 │   ├── certmanager/
 │   ├── externalsecrets/
-│   └── hive/
+│   ├── hive/
+│   └── clusters/               # AppProject + ApplicationSet for waggle-clusters
 └── apps/                       # what each child Application deploys
     ├── certmanager/            # kustomize + Helm chart
     ├── externalsecrets/        # kustomize + Helm chart
@@ -76,36 +77,36 @@ Point a Route53 record for `gitops.waggle.io` at the ALB (`kubectl -n argocd get
 
 After the root app syncs, Argo CD manages its own install via `gitops/argocd/argocd.yaml` (self-heal on, prune off).
 
-### 3. Give Argo CD access to this repo
+### 3. Give Argo CD access to the repos
 
-This repo is private, so Argo CD needs a GitHub token to read it. Create a [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new) with:
+Argo CD reads two private repos: `waggle-hub` (this repo) and `waggle-clusters`. Create a [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new) with:
 
 - **Resource owner:** `waggle-io`
-- **Repository access:** only `waggle-hub`
+- **Repository access:** only `waggle-hub` and `waggle-clusters`
 - **Permissions:** Contents → Read-only (Metadata → Read-only is added automatically)
 
-Then register it as an Argo CD repository Secret. The token never goes in Git:
+Register it as an Argo CD **credential template**. It applies to every repo URL under `https://github.com/waggle-io`, so both repos use one Secret. The token never goes in Git:
 
 ```sh
 read -rs GITHUB_TOKEN   # paste the token; keeps it out of shell history
 
-kubectl -n argocd create secret generic repo-waggle-hub \
+kubectl -n argocd create secret generic creds-waggle-io \
   --from-literal=type=git \
-  --from-literal=url=https://github.com/waggle-io/waggle-hub \
+  --from-literal=url=https://github.com/waggle-io \
   --from-literal=username=git \
   --from-literal=password="$GITHUB_TOKEN"
-kubectl -n argocd label secret repo-waggle-hub argocd.argoproj.io/secret-type=repository
+kubectl -n argocd label secret creds-waggle-io argocd.argoproj.io/secret-type=repo-creds
 
 unset GITHUB_TOKEN
 ```
 
-Check that Argo CD can reach the repo: **Settings → Repositories** in the UI should show `waggle-hub` as *Successful*, or run `argocd repo list --grpc-web`.
+The token only reaches the repos it was granted, so the URL prefix doesn't widen access. Check with `argocd repo list --grpc-web` once the root app has synced, or under **Settings → Repositories** in the UI.
 
 Fine-grained tokens expire. Before expiry, create a new token and update the Secret in place:
 
 ```sh
 read -rs GITHUB_TOKEN
-kubectl -n argocd patch secret repo-waggle-hub \
+kubectl -n argocd patch secret creds-waggle-io \
   -p "{\"stringData\":{\"password\":\"$GITHUB_TOKEN\"}}"
 unset GITHUB_TOKEN
 ```
@@ -188,6 +189,27 @@ and commit the result. Both scripts need `curl`, `jq` and `yq` (mikefarah v4).
 
 > The workflow needs **Settings → Actions → General → Allow GitHub Actions to create and approve pull requests** enabled on this repo.
 
+## Spoke clusters (waggle-clusters)
+
+`gitops/clusters/applicationset.yaml` creates one Argo CD Application per directory in [`waggle-clusters`](https://github.com/waggle-io/waggle-clusters) on `main`:
+
+```
+waggle-clusters/clusters/<name>/
+├── request.yaml    # ClusterRequest (not applied)
+├── rendered/       # Hive CRs, applied to namespace <name>
+└── cost.md         # cost report (not applied)
+```
+
+| PR to `waggle-clusters` | What happens on the hub |
+| --- | --- |
+| Add `clusters/<name>/` | Application `cluster-<name>` created; Hive provisions |
+| Change `rendered/` | Synced: MachinePool scaling, hibernation, TTL |
+| Delete `clusters/<name>/` | Application deleted with cascade; the `ClusterDeployment` is deleted and Hive deprovisions |
+
+The `waggle-clusters` AppProject (`gitops/clusters/appproject.yaml`) limits what a merged PR can create. It allows only `ClusterDeployment`, `MachinePool`, `SyncSet`, `Secret` and `ExternalSecret`, plus each cluster's own namespace, and denies hub namespaces (`argocd`, `hive`, `kube-*`, …). A PR that renders anything else fails to sync.
+
+> **Deprovision needs the cloud credentials.** Hive destroys the cluster after its `ClusterDeployment` is deleted, using the credentials Secret in the cluster's namespace. If that Secret (or the `ExternalSecret` that owns it) is pruned in the same cascade, deprovisioning can get stuck and leave cloud resources behind. The renderers should annotate credential resources with `argocd.argoproj.io/sync-options: Delete=false`. Verify this in the Phase 1 create-and-destroy cycles.
+
 ## Roadmap for this repo
 
 From the Waggle plan, the hub's pieces by phase:
@@ -201,7 +223,7 @@ From the Waggle plan, the hub's pieces by phase:
 - [x] External Secrets Operator installed
 - [ ] `ClusterSecretStore` and IRSA role for Secrets Manager; per-cluster credential and pull-secret sync
 - [x] Argo CD install in `deploy/argocd`, self-managed after bootstrap
-- [ ] Argo CD Application pointing at `waggle-clusters/clusters/`
+- [x] Argo CD ApplicationSet for `waggle-clusters/clusters/`, scoped by its own AppProject
 - [x] `ClusterImageSet`s for the offered OpenShift versions, generated from the update graph
 - [ ] Hand-written AWS `ClusterDeployment` provisioned and deprovisioned three times with no manual cleanup
 - [ ] Forced cert rotation tested

@@ -6,3 +6,5 @@ resources:
 - certmanager/certmanager.yaml
 - externalsecrets/externalsecrets.yaml
 - hive/hive.yaml
+- clusters/appproject.yaml
+- clusters/applicationset.yaml

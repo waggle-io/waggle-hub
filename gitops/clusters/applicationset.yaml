@@ -1,0 +1,51 @@
+# One Argo CD Application per spoke cluster in waggle-clusters:
+#   clusters/<name>/request.yaml   ClusterRequest (input, not applied)
+#   clusters/<name>/rendered/      Hive CRs, applied to namespace <name>
+#   clusters/<name>/cost.md        cost report (not applied)
+#
+# Lifecycle is driven by PRs to waggle-clusters' main branch:
+#   - add clusters/<name>/  -> Application created -> Hive provisions
+#   - edit rendered/        -> synced (e.g. MachinePool scaling, hibernation)
+#   - delete clusters/<name>/ -> Application deleted with cascade ->
+#     ClusterDeployment deleted -> Hive deprovisions the cloud resources
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: waggle-clusters
+  namespace: argocd
+  annotations:
+    # After the hive app (wave 1), which provides the CRDs
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+  - git:
+      repoURL: https://github.com/waggle-io/waggle-clusters
+      revision: main
+      directories:
+      - path: clusters/*
+  template:
+    metadata:
+      name: "cluster-{{.path.basename}}"
+      labels:
+        waggle.io/cluster: "{{.path.basename}}"
+      finalizers:
+      # Deleting the Application deletes the ClusterDeployment, which is what
+      # triggers Hive deprovisioning
+      - resources-finalizer.argocd.argoproj.io
+    spec:
+      project: waggle-clusters
+      source:
+        repoURL: https://github.com/waggle-io/waggle-clusters
+        targetRevision: main
+        path: "{{.path.path}}/rendered"
+      destination:
+        name: in-cluster
+        namespace: "{{.path.basename}}"
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+        - CreateNamespace=true

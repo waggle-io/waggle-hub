@@ -1,0 +1,48 @@
+# Limits what a merged waggle-clusters PR can put on the hub: Hive resources,
+# their Secrets and ExternalSecrets, in per-cluster namespaces only. Anything
+# else (RBAC, webhooks, hub namespaces, ClusterImageSets) is rejected even if
+# it gets merged.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: waggle-clusters
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  description: Spoke clusters rendered by Waggle, one Application per clusters/<name>
+  sourceRepos:
+  - https://github.com/waggle-io/waggle-clusters
+  # Destinations match on server, not name. Hub namespaces are denied.
+  destinations:
+  - server: https://kubernetes.default.svc
+    namespace: "*"
+  - server: "*"
+    namespace: "!argocd"
+  - server: "*"
+    namespace: "!hive"
+  - server: "*"
+    namespace: "!cert-manager"
+  - server: "*"
+    namespace: "!external-secrets"
+  - server: "*"
+    namespace: "!waggle"
+  - server: "*"
+    namespace: "!default"
+  - server: "*"
+    namespace: "!kube-*"
+  clusterResourceWhitelist:
+  # For CreateNamespace on each cluster's Application
+  - group: ""
+    kind: Namespace
+  namespaceResourceWhitelist:
+  - group: hive.openshift.io
+    kind: ClusterDeployment
+  - group: hive.openshift.io
+    kind: MachinePool
+  - group: hive.openshift.io
+    kind: SyncSet
+  - group: ""
+    kind: Secret
+  - group: external-secrets.io
+    kind: ExternalSecret
