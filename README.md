@@ -30,6 +30,7 @@ waggle-hub/
 │   ├── eks/                    # Terraform: VPC, EKS, EBS CSI, AWS LB controller, ACM private CA
 │   └── argocd/                 # Argo CD install: kustomize over upstream install.yaml
 ├── hack/                       # ClusterImageSet generator and checks
+├── examples/                   # hand-written spoke clusters (e.g. demo-aws) for testing
 ├── gitops/
 │   ├── rootapp.yaml            # app of apps: apply once, Argo CD manages the rest
 │   ├── kustomization.yaml      # lists the child Applications
@@ -58,6 +59,8 @@ $(terraform output -raw configure_kubectl)
 ```
 
 Review `variables.tf` first (region, cluster name, node sizing, domain). Size the node group for Hive plus install pods: install pods are short-lived but memory-hungry.
+
+Terraform also creates the hub's Secrets Manager secrets (empty) and the IRSA role External Secrets uses to read them. See [Secrets](#secrets). Fill them in before creating any spoke cluster.
 
 ### 2. Install Argo CD
 
@@ -135,7 +138,7 @@ Expect `hive-operator`, `hive-controllers`, `hive-clustersync`, `hive-machinepoo
 | App | Source | Version | Notes |
 | --- | --- | --- | --- |
 | cert-manager | `charts.jetstack.io` | `v1.21.2` | CRDs installed by the chart and kept on uninstall |
-| external-secrets | `charts.external-secrets.io` | `2.12.0` | No `ClusterSecretStore` yet; needs an IRSA role for AWS Secrets Manager |
+| external-secrets | `charts.external-secrets.io` | `2.12.0` | IRSA role from Terraform; `aws-secrets-manager` ClusterSecretStore for spoke-cluster namespaces |
 | hive | `github.com/openshift/hive` | commit `01de8ed` | Operator, 21 CRDs and `HiveConfig`; image `quay.io/openshift-hive/hive:01de8edf26` |
 
 Child Applications carry sync waves (Argo CD in wave -1, cert-manager and external-secrets in wave 0, Hive in wave 1). The `Application` health check in `deploy/argocd/argocd-cm.yaml` makes each wave wait for the previous one to be healthy.
@@ -210,6 +213,39 @@ The `waggle-clusters` AppProject (`gitops/clusters/appproject.yaml`) limits what
 
 > **Deprovision needs the cloud credentials.** Hive destroys the cluster after its `ClusterDeployment` is deleted, using the credentials Secret in the cluster's namespace. If that Secret (or the `ExternalSecret` that owns it) is pruned in the same cascade, deprovisioning can get stuck and leave cloud resources behind. The renderers should annotate credential resources with `argocd.argoproj.io/sync-options: Delete=false`. Verify this in the Phase 1 create-and-destroy cycles.
 
+## Secrets
+
+Cloud credentials and the pull secret live in AWS Secrets Manager in the hub account, under the `waggle/` prefix. `deploy/eks/secrets.tf` creates:
+
+| Resource | Purpose |
+| --- | --- |
+| `waggle/aws/target-account` | AWS credentials Hive uses for the spoke account (`aws_access_key_id`, `aws_secret_access_key`) |
+| `waggle/redhat/pull-secret` | Red Hat pull secret |
+| `waggle/ssh/hive` | SSH key pair for gathering install logs (`ssh-privatekey`, `ssh-publickey`) |
+| IAM role `waggle-hub-external-secrets` | IRSA role for the `external-secrets/external-secrets` ServiceAccount, allowed to read `waggle/*` only |
+
+Terraform creates the secrets **empty**, so their values never reach Terraform state. Set them once after `terraform apply`:
+
+```sh
+aws secretsmanager put-secret-value --secret-id waggle/aws/target-account \
+  --secret-string '{"aws_access_key_id":"…","aws_secret_access_key":"…"}'
+
+aws secretsmanager put-secret-value --secret-id waggle/redhat/pull-secret \
+  --secret-string file://pull-secret.json
+
+ssh-keygen -t rsa -b 4096 -m PEM -N '' -f hive-ssh -C hive
+jq -n --rawfile priv hive-ssh --rawfile pub hive-ssh.pub \
+  '{"ssh-privatekey": $priv, "ssh-publickey": $pub}' > hive-ssh.json
+aws secretsmanager put-secret-value --secret-id waggle/ssh/hive --secret-string file://hive-ssh.json
+rm hive-ssh hive-ssh.json   # keep hive-ssh.pub for install-config sshKey
+```
+
+To add a secret, add it to `var.secrets`; anything under `waggle/` is readable without IAM changes.
+
+On the cluster, the `aws-secrets-manager` ClusterSecretStore (`apps/externalsecrets/clustersecretstore.yaml`) serves only namespaces labelled `waggle.io/cluster-namespace: "true"`. The `waggle-clusters` ApplicationSet adds that label to every namespace it creates. Other hub namespaces can't read the cloud credentials, even with an `ExternalSecret`.
+
+> The role ARN in `apps/externalsecrets/kustomization.yaml` contains the hub's AWS account ID (`514314268914`). If the hub moves to another account or `cluster_name` changes, update it from `terraform output external_secrets_role_arn`.
+
 ## Roadmap for this repo
 
 From the Waggle plan, the hub's pieces by phase:
@@ -221,11 +257,11 @@ From the Waggle plan, the hub's pieces by phase:
 - [x] Apply order via sync waves: CRDs, operator and RBAC, then `HiveConfig`
 - [x] Cert renewer using the EKS `app-serving` signer
 - [x] External Secrets Operator installed
-- [ ] `ClusterSecretStore` and IRSA role for Secrets Manager; per-cluster credential and pull-secret sync
+- [x] Secrets Manager secrets, IRSA role and `ClusterSecretStore`; per-cluster sync via `ExternalSecret`s
 - [x] Argo CD install in `deploy/argocd`, self-managed after bootstrap
 - [x] Argo CD ApplicationSet for `waggle-clusters/clusters/`, scoped by its own AppProject
 - [x] `ClusterImageSet`s for the offered OpenShift versions, generated from the update graph
-- [ ] Hand-written AWS `ClusterDeployment` provisioned and deprovisioned three times with no manual cleanup
+- [ ] Hand-written AWS `ClusterDeployment` ([`examples/clusters/demo-aws`](examples/clusters/demo-aws)) provisioned and deprovisioned three times with no manual cleanup
 - [ ] Forced cert rotation tested
 
 **Later phases**

@@ -1,0 +1,49 @@
+# OpenShift installer config, packed into the demo-aws-install-config Secret
+# by kustomization.yaml. Hive replaces pullSecret with the contents of
+# pullSecretRef; everything else is passed to openshift-install as written.
+apiVersion: v1
+metadata:
+  name: demo-aws
+baseDomain: aws.waggle.io
+controlPlane:
+  name: master
+  replicas: 3
+  platform:
+    aws:
+      type: m6i.xlarge
+      rootVolume:
+        size: 120
+        type: gp3
+compute:
+- name: worker
+  replicas: 3
+  platform:
+    aws:
+      type: m6i.xlarge
+      rootVolume:
+        size: 120
+        type: gp3
+networking:
+  networkType: OVNKubernetes
+  clusterNetwork:
+  - cidr: 10.128.0.0/14
+    hostPrefix: 23
+  machineNetwork:
+  - cidr: 10.0.0.0/16
+  serviceNetwork:
+  - 172.30.0.0/16
+platform:
+  aws:
+    region: ap-south-1
+    # Applied by the installer to every AWS resource it creates, so spend and
+    # orphans can be traced back to the cluster and its owner
+    userTags:
+      waggle.io/cluster-id: demo-aws
+      waggle.io/owner: platform-team
+      waggle.io/team: platform
+publish: External
+pullSecret: ""   # replaced by Hive with the contents of pullSecretRef
+# Public half of the demo-aws-ssh-key Secret. Hive does not inject it; the
+# installer puts it on every node. Replace before use (public keys are safe
+# to commit).
+sshKey: ssh-rsa REPLACE_WITH_PUBLIC_KEY_FROM_waggle/ssh/hive

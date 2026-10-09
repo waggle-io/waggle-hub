@@ -58,3 +58,12 @@ output "service_urls" {
   description = "HTTPS URLs for each exposed service"
   value       = { for k, s in local.services_map : k => "https://${s.host}" }
 }
+output "external_secrets_role_arn" {
+  description = "IRSA role for the external-secrets ServiceAccount; must match the annotation in apps/externalsecrets/kustomization.yaml"
+  value       = module.external_secrets_irsa.iam_role_arn
+}
+
+output "secrets_manager_secret_arns" {
+  description = "Secrets Manager secrets created for the hub (values are set out of band)"
+  value       = { for k, s in aws_secretsmanager_secret.this : k => s.arn }
+}

@@ -1,0 +1,37 @@
+# OpenShift IPI cluster on AWS, provisioned by Hive on the hub.
+# API endpoint once installed: https://api.demo-aws.aws.waggle.io:6443
+apiVersion: hive.openshift.io/v1
+kind: ClusterDeployment
+metadata:
+  name: demo-aws
+  namespace: demo-aws
+  labels:
+    waggle.io/cluster-id: demo-aws
+    waggle.io/owner: platform-team
+    waggle.io/team: platform
+spec:
+  clusterName: demo-aws
+  # Public Route53 hosted zone that must already exist in the target AWS account
+  baseDomain: aws.waggle.io
+  platform:
+    aws:
+      region: ap-south-1
+      credentialsSecretRef:
+        name: demo-aws-aws-creds
+  pullSecretRef:
+    name: demo-aws-pull-secret
+  provisioning:
+    # Offered versions are the ClusterImageSets in apps/hive/clusterimagesets
+    imageSetRef:
+      name: openshift-4.21.35-x86-64
+    installConfigSecretRef:
+      name: demo-aws-install-config
+    # Lets Hive SSH to the nodes to gather logs if the install fails
+    sshPrivateKeySecretRef:
+      name: demo-aws-ssh-key
+  installAttemptsLimit: 3
+  # Not set here, on purpose:
+  # - powerState / hibernateAfter: hibernation schedules are a Phase 7 controller
+  # - the hive.openshift.io/delete-after annotation: Hive would delete the
+  #   ClusterDeployment and Argo CD would recreate it. The TTL is enforced by
+  #   a PR that deletes clusters/<name>/ in waggle-clusters instead.

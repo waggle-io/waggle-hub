@@ -1,0 +1,19 @@
+# Lets Hive manage the default worker MachineSets after install (scaling via
+# PR). Must match the `compute` section of install-config.yaml; platform is
+# immutable once created.
+apiVersion: hive.openshift.io/v1
+kind: MachinePool
+metadata:
+  name: demo-aws-worker
+  namespace: demo-aws
+spec:
+  clusterDeploymentRef:
+    name: demo-aws
+  name: worker
+  replicas: 3
+  platform:
+    aws:
+      type: m6i.xlarge
+      rootVolume:
+        size: 120
+        type: gp3

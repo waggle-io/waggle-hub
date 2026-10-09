@@ -85,6 +85,28 @@ variable "services" {
     health_check_path = optional(string, "/") # ALB health check path
   }))
   default = [
-     { name = "gitops", port = 3443, host = "gitops.waggle.io" },
-   ]
+    { name = "gitops", port = 3443, host = "gitops.waggle.io" },
+  ]
+}
+
+variable "secrets_prefix" {
+  description = "Path prefix for the hub's Secrets Manager secrets. External Secrets can read every secret under it and nothing else."
+  type        = string
+  default     = "waggle"
+}
+
+variable "secrets" {
+  description = "Secrets Manager secrets to create under secrets_prefix, as name => description. Terraform creates them empty; set values with `aws secretsmanager put-secret-value`."
+  type        = map(string)
+  default = {
+    "aws/target-account" = "AWS credentials for the spoke target account, JSON keys: aws_access_key_id, aws_secret_access_key"
+    "redhat/pull-secret" = "Red Hat pull secret JSON from console.redhat.com"
+    "ssh/hive"           = "SSH key pair Hive uses to gather install logs, JSON keys: ssh-privatekey, ssh-publickey"
+  }
+}
+
+variable "secrets_recovery_window_in_days" {
+  description = "Days a deleted secret can be restored before Secrets Manager removes it permanently (0 deletes immediately)"
+  type        = number
+  default     = 7
 }

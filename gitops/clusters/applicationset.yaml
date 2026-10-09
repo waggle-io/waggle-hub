@@ -49,3 +49,7 @@ spec:
           selfHeal: true
         syncOptions:
         - CreateNamespace=true
+        managedNamespaceMetadata:
+          labels:
+            # Lets ExternalSecrets here use the aws-secrets-manager ClusterSecretStore
+            waggle.io/cluster-namespace: "true"
