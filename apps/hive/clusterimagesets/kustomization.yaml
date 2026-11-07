@@ -9,7 +9,13 @@ commonAnnotations:
 resources:
 - openshift-4.20.39-x86-64.yaml
 - openshift-4.20.40-x86-64.yaml
+- openshift-4.20.45-x86-64.yaml
+- openshift-4.20.46-x86-64.yaml
 - openshift-4.21.34-x86-64.yaml
 - openshift-4.21.35-x86-64.yaml
+- openshift-4.21.41-x86-64.yaml
+- openshift-4.21.42-x86-64.yaml
 - openshift-4.22.15-x86-64.yaml
 - openshift-4.22.16-x86-64.yaml
+- openshift-4.22.21-x86-64.yaml
+- openshift-4.22.22-x86-64.yaml

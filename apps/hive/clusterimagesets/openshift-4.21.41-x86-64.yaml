@@ -1,0 +1,15 @@
+apiVersion: hive.openshift.io/v1
+kind: ClusterImageSet
+metadata:
+  name: openshift-4.21.41-x86-64
+  labels:
+    waggle.io/minor: "4.21"
+    waggle.io/channel: stable
+    waggle.io/offered: "true"
+    waggle.io/default: "false"
+  annotations:
+    waggle.io/version: 4.21.41
+    waggle.io/errata: https://access.redhat.com/errata/RHSA-2026:92994
+    waggle.io/support-ends: "2027-08-03"
+spec:
+  releaseImage: quay.io/openshift-release-dev/ocp-release@sha256:bcbc7f31b5ff1849bad7fd0b11a8d0a22e1ae2a2879a51bf25e1fd7a2b266605
